@@ -8,6 +8,10 @@ to be combined with [https://github.com/dominictarr/json-sst] to form a pure js 
 All data is stored as line separated json, so to avoid tricky binary stuff.
 It is intended this will be replaced once [https://github.com/rvagg/node-leveljs](leveljs) is ready.
 
+# Stability
+
+Unstable: Expect patches and features, possible api changes.
+
 ## License
 
 MIT
