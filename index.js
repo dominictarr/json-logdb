@@ -1,5 +1,6 @@
 var fs = require('fs')
 var split = require('split')
+var Iterator = require('async-iterator')
 
 function delay (fun) {
   return function () {
@@ -12,27 +13,12 @@ function delay (fun) {
   }
 }
 
-/*
-function once (fun) {
-  var called = false
-  return function () {
-    if(called) return
-    called = true
-    fun.apply(this, arguments)
-  }
-}
-*/
-
 module.exports = function (file, cb) {
-  var store = {}
-
-  var fd
-  var _cbs = []
-  var _queue = []
-  var queued = false
-  var position = 0
+  var store = {}, _cbs = [], _queue = []
+  var fd, queued = false, position = 0
 
   function processQueue() {
+    if(!_queue.length) return queued = false
     queued = true
     var queue = _queue
     var cbs   = _cbs
@@ -58,6 +44,7 @@ module.exports = function (file, cb) {
       //also, writing to a stream isn't good enough, because we need to
       //know exactly which writes succeded, and which failed!
       fs.write(fd, json, 0, json.length, position, function (err) {
+        queued = false
         if(err)
           return cbs.forEach(function (cb) { cb(err) })
 
@@ -138,6 +125,32 @@ module.exports = function (file, cb) {
     },
     approximateSize: function (cb) {
       delay(cb)(null, position)
+    },
+    iterator: function (opts) {
+      opts = opts || {}
+      var snapshot = 
+        Object.keys(store).sort().filter(function (k) {
+          return (
+             (opts.start ? opts.start <= k : true)
+          && (opts.end   ? opts.end   >= k : true)
+          )
+        }).map(function (k) {
+          return {key: k, value: store[k]}
+        })
+
+      if(opts.reverse)
+        snapshot.reverse()
+
+      return Iterator(function (i, cb) {
+          if(i >= snapshot.length) return cb()
+          var item = snapshot[i]
+          cb(null, opts.keys   ? item.key 
+                 : opts.values ? item.value 
+                 :               item
+          )
+        }, function () {
+          snapshot.length = 0
+        })
     }
   }
 }
