@@ -1,8 +1,9 @@
 var db = require('../')('/tmp/levellog-whatever.log')
+var pull = require('pull-stream')
 
 db.open(function (err) {
   if(err) throw err
-
+  console.log('DB', db)
   db.put('key', 'value', function () {
     console.log('written')
   })
@@ -16,17 +17,8 @@ db.open(function (err) {
     {key: 'key', type: 'del'}
   ], function () {
 
-    var it = db.iterator()
+    db.iterator()
+    .pipe(pull.drain(console.log))
 
-    ;(function next() {
-      it.next(function (err, item) {
-        if(err) throw err
-        if(item) {
-          console.log(item)
-          next()
-        }
-      })
-    })()
-    
   })
 })

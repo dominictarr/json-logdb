@@ -1,6 +1,6 @@
 var fs = require('fs')
 var split = require('split')
-var Iterator = require('async-iterator')
+var pull = require('pull-stream')
 
 function delay (fun) {
   return function () {
@@ -16,6 +16,8 @@ function delay (fun) {
 module.exports = function (file, cb) {
   var store = {}, _cbs = [], _queue = []
   var fd, queued = false, position = 0
+
+  console.log(store)
 
   function processQueue() {
     if(!_queue.length) return queued = false
@@ -51,14 +53,15 @@ module.exports = function (file, cb) {
         //if this write succedded, move the cursor forward!
         position += json.length
 
+        console.log(queue, store)
         //the write succeded! update the store!
         queue.forEach(function (ch) {
           if(ch.type == 'del')
             delete store[ch.key]
-          else
+          else {
             store[ch.key] = ch.value
+          }
         })
-
         //callback to everyone!
         cbs.forEach(function (cb) { cb() })
       })
@@ -101,8 +104,9 @@ module.exports = function (file, cb) {
         position = stat.size
 
         fs.createReadStream(file)
-          .pipe(split(/\r?\n/), JSON.parse)
+          .pipe(split(/\r?\n/, JSON.parse))
           .on('data', function (data) {
+            console.log('DATA', store, typeof data)
             store[data.key] = data.value
           })
           .on('end',   done)
@@ -115,12 +119,14 @@ module.exports = function (file, cb) {
       return this
     },
     put: function (key, value, cb) {
+      console.log('PUT', store, key, value)
       return queueWrite({key: key, value: value, type: 'put'}, cb)
     },
     del: function (key, value, cb) {
       return queueWrite({key: key, value: value, type: 'del'}, cb)
     },
     batch: function (array, cb) {
+      console.log('BATCH', store, array)
       return queueWrite(array, cb)
     },
     approximateSize: function (cb) {
@@ -128,6 +134,7 @@ module.exports = function (file, cb) {
     },
     iterator: function (opts) {
       opts = opts || {}
+        console.log(store)
       var snapshot = 
         Object.keys(store).sort().filter(function (k) {
           return (
@@ -135,22 +142,18 @@ module.exports = function (file, cb) {
           && (opts.end   ? opts.end   >= k : true)
           )
         }).map(function (k) {
-          return {key: k, value: store[k]}
+          return (
+              opts.keys   ? k 
+            : opts.values ? store[k] 
+            :               {key: k, value: store[k]}
+          )
         })
 
       if(opts.reverse)
         snapshot.reverse()
 
-      return Iterator(function (i, cb) {
-          if(i >= snapshot.length) return cb()
-          var item = snapshot[i]
-          cb(null, opts.keys   ? item.key 
-                 : opts.values ? item.value 
-                 :               item
-          )
-        }, function () {
-          snapshot.length = 0
-        })
+      return pull.values(snapshot)
+
     }
   }
 }
