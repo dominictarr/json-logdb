@@ -8,8 +8,8 @@
     "url": "git://github.com/dominictarr/json-logdb.git"
   },
   "dependencies": {
-    "async-iterator": "~1.1.0",
-    "split": "~0.2.1"
+    "split": "~0.2.1",
+    "pull-stream": "~2.18.1"
   },
   "devDependencies": {
     "tape": "~0.2.2"
