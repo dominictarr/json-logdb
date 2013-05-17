@@ -17,8 +17,6 @@ module.exports = function (file, cb) {
   var store = {}, _cbs = [], _queue = []
   var fd, queued = false, position = 0
 
-  console.log(store)
-
   function processQueue() {
     if(!_queue.length) return queued = false
     queued = true
@@ -53,7 +51,6 @@ module.exports = function (file, cb) {
         //if this write succedded, move the cursor forward!
         position += json.length
 
-        console.log(queue, store)
         //the write succeded! update the store!
         queue.forEach(function (ch) {
           if(ch.type == 'del')
@@ -103,10 +100,10 @@ module.exports = function (file, cb) {
         //if there is already a file, start writing to end
         position = stat.size
 
+        //TODO: use pull-fs instead.
         fs.createReadStream(file)
           .pipe(split(/\r?\n/, JSON.parse))
           .on('data', function (data) {
-            console.log('DATA', store, typeof data)
             store[data.key] = data.value
           })
           .on('end',   done)
@@ -119,14 +116,12 @@ module.exports = function (file, cb) {
       return this
     },
     put: function (key, value, cb) {
-      console.log('PUT', store, key, value)
       return queueWrite({key: key, value: value, type: 'put'}, cb)
     },
     del: function (key, value, cb) {
       return queueWrite({key: key, value: value, type: 'del'}, cb)
     },
     batch: function (array, cb) {
-      console.log('BATCH', store, array)
       return queueWrite(array, cb)
     },
     approximateSize: function (cb) {
@@ -134,7 +129,6 @@ module.exports = function (file, cb) {
     },
     iterator: function (opts) {
       opts = opts || {}
-        console.log(store)
       var snapshot = 
         Object.keys(store).sort().filter(function (k) {
           return (
