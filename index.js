@@ -30,42 +30,28 @@ module.exports = function (file, cb) {
       return JSON.stringify(e)
     }).join('\n') + '\n')
 
-    if(!fd)
-      fs.open(file, 'a', function (err, _fd) {
-        if(err)
-          return cbs.forEach(function (cb) {
-            cb(err)
-          })
-        fd = _fd
-        write()
+    //we use write directly, because we want this to occur as a batch!
+    //also, writing to a stream isn't good enough, because we need to
+    //know exactly which writes succeded, and which failed!
+    fs.write(fd, json, 0, json.length, position, function (err) {
+      queued = false
+      if(err)
+        return cbs.forEach(function (cb) { cb(err) })
+
+      //if this write succedded, move the cursor forward!
+      position += json.length
+
+      //the write succeded! update the store!
+      queue.forEach(function (ch) {
+        if(ch.type == 'del')
+          delete store[ch.key]
+        else {
+          store[ch.key] = ch.value
+        }
       })
-    else write()
-
-    function write () {
-      //we use write directly, because we want this to occur as a batch!
-      //also, writing to a stream isn't good enough, because we need to
-      //know exactly which writes succeded, and which failed!
-      fs.write(fd, json, 0, json.length, position, function (err) {
-        queued = false
-        if(err)
-          return cbs.forEach(function (cb) { cb(err) })
-
-        //if this write succedded, move the cursor forward!
-        position += json.length
-
-        //the write succeded! update the store!
-        queue.forEach(function (ch) {
-          if(ch.type == 'del')
-            delete store[ch.key]
-          else {
-            store[ch.key] = ch.value
-          }
-        })
-        //callback to everyone!
-        cbs.forEach(function (cb) { cb() })
-      })
-
-    }
+      //callback to everyone!
+      cbs.forEach(function (cb) { cb() })
+    })
 
   }
 
@@ -89,22 +75,29 @@ module.exports = function (file, cb) {
     opened: false,
     location: file,
     open: function (cb) {
+      console.log('opening?')
       var once = false
       function done (err) {
+        console.log('OPEN', err)
         if(once) return
         once = true
-        if(err) cb(err)
-        ll.opened = true
-        cb()
+        console.log('get fd')
+        fs.open(file, 'a', function (err, _fd) {
+          if(err) cb(err)
+          ll.opened = true
+          fd = _fd
+          console.log('fd=', fd)
+          cb(null, ll)
+        })
       }
       if(ll.opened) delay(done)()
       fs.stat(file, function (err, stat) {
         if(err)
-          return cb(err.code == 'ENOENT' ? null : err)
+          return done(err.code == 'ENOENT' ? null : err)
 
         //if there is already a file, start writing to end
         position = stat.size
-
+        
         //TODO: use pull-fs instead.
         pull(
           toPull.source(fs.createReadStream(file)),
@@ -117,25 +110,31 @@ module.exports = function (file, cb) {
       })
     },
     get: function (key, cb) {
+      if(!ll.opened) return cb(new Error('not open: ' + ll.location))
       if(store[key]) cb(null, store[key])
       else           cb(new Error('not found'))
       return this
     },
     put: function (key, value, cb) {
+      if(!ll.opened) return cb(new Error('not open: ' + ll.location))
       return queueWrite({key: key, value: value, type: 'put'}, cb)
     },
     del: function (key, value, cb) {
+      if(!ll.opened) return cb(new Error('not open'))
       return queueWrite({key: key, value: value, type: 'del'}, cb)
     },
     batch: function (array, cb) {
+      if(!ll.opened) return cb(new Error('not open'))
       return queueWrite(array, cb)
     },
     approximateSize: function (cb) {
+      if(!ll.opened) return cb(new Error('not open'))
       delay(cb)(null, position)
     },
     iterator: function (opts) {
+      if(!ll.opened) throw new Error('not open')
       opts = opts || {}
-      var snapshot = 
+      var snapshot =
         Object.keys(store).sort().filter(function (k) {
           return (
              (opts.start ? opts.start <= k : true)
@@ -143,8 +142,8 @@ module.exports = function (file, cb) {
           )
         }).map(function (k) {
           return (
-              opts.keys   ? k 
-            : opts.values ? store[k] 
+              opts.keys   ? k
+            : opts.values ? store[k]
             :               {key: k, value: store[k]}
           )
         })
