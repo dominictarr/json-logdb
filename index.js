@@ -15,7 +15,7 @@ function delay (fun) {
 }
 
 module.exports = function (file, cb) {
-  var store = {}, _cbs = [], _queue = []
+  var store = {}, _cbs = [], _queue = [], wl = 0, freezeCb, frozen = false
   var fd, queued = false, position = 0
 
   function processQueue() {
@@ -26,6 +26,8 @@ module.exports = function (file, cb) {
     var cbs   = _cbs
     _queue = []; _cbs = []
 
+    wl = queue.length
+
     var json = new Buffer(queue.map(function (e) {
       return JSON.stringify(e)
     }).join('\n') + '\n')
@@ -35,9 +37,11 @@ module.exports = function (file, cb) {
     //know exactly which writes succeded, and which failed!
     fs.write(fd, json, 0, json.length, position, function (err) {
       queued = false
-      if(err)
+      wl = 0
+      if(err) {
+        if(_queue.length == 0 && freezeCb) freezeCb()
         return cbs.forEach(function (cb) { cb(err) })
-
+      }
       //if this write succedded, move the cursor forward!
       position += json.length
 
@@ -50,7 +54,12 @@ module.exports = function (file, cb) {
         }
       })
       //callback to everyone!
+      if(_queue.length == 0 && freezeCb) freezeCb()
       cbs.forEach(function (cb) { cb() })
+
+      //notify when the database is completely drained.
+      //wait for ALL pending writes to finish.
+      //need to wait for all writes to be finalized before compaction.
     })
 
   }
@@ -70,23 +79,38 @@ module.exports = function (file, cb) {
     }
   }
 
+  function checkErr(cb) {
+    if(!ll.opened) {
+      cb(new Error('not open: ' + ll.location))
+      return true
+    }
+    if(frozen) {
+      cb(new Error('database:' + ll.location + ' is now read-only'))
+      return true
+    }
+  }
+
   var ll
   return ll = {
     opened: false,
     location: file,
+    checkQueue: function () {
+      return _queue.length + wl
+    },
+    freeze: function (cb) {
+      frozen = true
+      if(_queue.length + wl === 0) cb()
+      else freezeCb = cb
+    },
     open: function (cb) {
-      console.log('opening?')
       var once = false
       function done (err) {
-        console.log('OPEN', err)
         if(once) return
         once = true
-        console.log('get fd')
         fs.open(file, 'a', function (err, _fd) {
           if(err) cb(err)
           ll.opened = true
           fd = _fd
-          console.log('fd=', fd)
           cb(null, ll)
         })
       }
@@ -97,13 +121,12 @@ module.exports = function (file, cb) {
 
         //if there is already a file, start writing to end
         position = stat.size
-        
-        //TODO: use pull-fs instead.
+
         pull(
           toPull.source(fs.createReadStream(file)),
           split(/\r?\n/, function (e) { if (e) return JSON.parse(e) }),
           pull.through(function (data) {
-            store[data.key] = data.value
+            if(data) store[data.key] = data.value
           }),
           pull.drain(null, done)
         )
@@ -116,15 +139,15 @@ module.exports = function (file, cb) {
       return this
     },
     put: function (key, value, cb) {
-      if(!ll.opened) return cb(new Error('not open: ' + ll.location))
+      if(checkErr(cb)) return
       return queueWrite({key: key, value: value, type: 'put'}, cb)
     },
     del: function (key, value, cb) {
-      if(!ll.opened) return cb(new Error('not open'))
+      if(checkErr(cb)) return
       return queueWrite({key: key, value: value, type: 'del'}, cb)
     },
     batch: function (array, cb) {
-      if(!ll.opened) return cb(new Error('not open'))
+      if(checkErr(cb)) return
       return queueWrite(array, cb)
     },
     approximateSize: function (cb) {
