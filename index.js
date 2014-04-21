@@ -1,6 +1,7 @@
-var fs = require('fs')
-var split = require('split')
+;var fs = require('fs')
+var split = require('pull-split')
 var pull = require('pull-stream')
+var toPull = require('stream-to-pull-stream')
 
 function delay (fun) {
   return function () {
@@ -20,6 +21,7 @@ module.exports = function (file, cb) {
   function processQueue() {
     if(!_queue.length) return queued = false
     queued = true
+
     var queue = _queue
     var cbs   = _cbs
     _queue = []; _cbs = []
@@ -76,13 +78,16 @@ module.exports = function (file, cb) {
 
     _cbs.push(cb)
 
-    if(!queued) //or use longer delays?
+    if(!queued) {//or use longer delays?
       process.nextTick(processQueue)
+      queued = true
+    }
   }
 
   var ll
   return ll = {
     opened: false,
+    location: file,
     open: function (cb) {
       var once = false
       function done (err) {
@@ -94,25 +99,26 @@ module.exports = function (file, cb) {
       }
       if(ll.opened) delay(done)()
       fs.stat(file, function (err, stat) {
-        if(err && err.code == 'ENOENT')
-          return cb()
+        if(err)
+          return cb(err.code == 'ENOENT' ? null : err)
 
         //if there is already a file, start writing to end
         position = stat.size
 
         //TODO: use pull-fs instead.
-        fs.createReadStream(file)
-          .pipe(split(/\r?\n/, JSON.parse))
-          .on('data', function (data) {
+        pull(
+          toPull.source(fs.createReadStream(file)),
+          split(/\r?\n/, function (e) { if (e) return JSON.parse(e) }),
+          pull.through(function (data) {
             store[data.key] = data.value
-          })
-          .on('end',   done)
-          .on('error', done)
+          }),
+          pull.drain(null, done)
+        )
       })
     },
     get: function (key, cb) {
       if(store[key]) cb(null, store[key])
-      else           cb(new Error('key not found'))
+      else           cb(new Error('not found'))
       return this
     },
     put: function (key, value, cb) {
@@ -148,6 +154,7 @@ module.exports = function (file, cb) {
 
       return pull.values(snapshot)
 
-    }
+    },
+    createReadStream: function (opts) { return ll.iterator(opts) }
   }
 }
