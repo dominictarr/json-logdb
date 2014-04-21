@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "split": "~0.2.1",
-    "pull-stream": "~2.18.1"
+    "pull-stream": "~2.22.0",
+    "pull-split": "~0.1.2"
   },
   "devDependencies": {
     "tape": "~2.12.3"
