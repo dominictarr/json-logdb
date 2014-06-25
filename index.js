@@ -2,6 +2,7 @@
 var split = require('pull-split')
 var pull = require('pull-stream')
 var toPull = require('stream-to-pull-stream')
+var ltgt = require('ltgt')
 
 function delay (fun) {
   return function () {
@@ -102,7 +103,10 @@ module.exports = function (file, cb) {
       if(_queue.length + wl === 0) cb()
       else freezeCb = cb
     },
-    open: function (cb) {
+    open: function (opts, cb) {
+      if('function' === typeof opts)
+        cb = opts, opts = {}
+
       var once = false
       function done (err) {
         if(once) return
@@ -159,24 +163,34 @@ module.exports = function (file, cb) {
       opts = opts || {}
       var snapshot =
         Object.keys(store).sort().filter(function (k) {
-          return (
-             (opts.start ? opts.start <= k : true)
-          && (opts.end   ? opts.end   >= k : true)
-          )
+          return ltgt.contains(opts, k)
         }).map(function (k) {
-          return (
-              opts.keys   ? k
-            : opts.values ? store[k]
-            :               {key: k, value: store[k]}
-          )
+          return {key: k, value: store[k]}
         })
 
       if(opts.reverse)
         snapshot.reverse()
 
-      return pull.values(snapshot)
+      var i = 0
+      return {
+        next: function (cb) {
+          var data = snapshot[i++]
+          if (i > snapshot.length) return cb()
+          cb(null, data.key, data.value)
+        },
+        end: function (cb) { cb() }
+      }
 
     },
-    createReadStream: function (opts) { return ll.iterator(opts) }
+    createReadStream: function (opts) {
+      var it = ll.iterator(opts)
+      return function (abort, cb) {
+        if(abort) it.end(cb)
+        else it.next(function (err, key, value) {
+          if(key === undefined && value === undefined) cb(err || true)
+          else cb(null, {key: key, value: value})
+        })
+      }
+    }
   }
 }
