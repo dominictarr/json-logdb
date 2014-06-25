@@ -1,7 +1,7 @@
 {
   "name": "json-logdb",
   "description": "A simple in-memory json-log database.",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "homepage": "https://github.com/dominictarr/json-logdb",
   "repository": {
     "type": "git",
